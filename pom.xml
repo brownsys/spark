@@ -212,6 +212,9 @@
     <PermGen>64m</PermGen>
     <MaxPermGen>512m</MaxPermGen>
     <CodeCacheSize>512m</CodeCacheSize>
+
+    <aspectj.version>1.8.7</aspectj.version>
+    <tracingplane.version>4.0</tracingplane.version>
   </properties>
   <repositories>
     <repository>
@@ -327,6 +330,79 @@
     </pluginRepository>
   </pluginRepositories>
   <dependencies>
+
+        <dependency>
+            <groupId>org.aspectj</groupId>
+            <artifactId>aspectjrt</artifactId>
+            <version>${aspectj.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>tracingplane-common</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>xtrace-common</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>pivottracing-common</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>retro-common</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>tracingplane-client</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>xtrace-client</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>pivottracing-agent</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>retro-resources</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>retro-throttling</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>tracingplane-aspects</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>xtrace-aspects</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>pivottracing-aspects</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>retro-aspects</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
+
+
     <!--
       This is a dummy dependency that is used along with the shading plug-in
       to create effective poms on publishing (see SPARK-3812).
@@ -2367,6 +2443,52 @@
           </execution>
         </executions>
       </plugin>
+
+
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>1.8</version>
+                <executions>
+                    <execution>
+                        <id>compile</id>
+                        <phase>process-classes</phase>
+                        <configuration>
+                            <target>
+                                <property name="compile_classpath"
+                                    refid="maven.compile.classpath" />
+                                    
+                                <exec executable="ajc">
+                                    <arg value="-inpath" />
+                                    <arg
+                                        value="${project.build.directory}/scala-${scala.binary.version}/classes" />
+                                    <arg value="-d" />
+                                    <arg
+                                        value="${project.build.directory}/scala-${scala.binary.version}/classes" />
+                                    <arg value="-aspectpath" />
+                                    <arg
+                                        value="${edu.brown.cs.systems:tracingplane-aspects:jar}" />
+                                    <arg value="-aspectpath" />
+                                    <arg
+                                        value="${edu.brown.cs.systems:xtrace-aspects:jar}" />
+                                    <arg value="-aspectpath" />
+                                    <arg
+                                        value="${edu.brown.cs.systems:retro-aspects:jar}" />
+                                    <arg value="-classpath" />
+                                    <arg value="${compile_classpath}" />
+                                    <arg value="-showWeaveInfo" />
+                                </exec>
+                            </target>
+                        </configuration>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+
     </plugins>
   </build>
 
