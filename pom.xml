@@ -392,6 +392,11 @@
             <artifactId>retro-aspects</artifactId>
             <version>${tracingplane.version}</version>
         </dependency>
+        <dependency>
+            <groupId>edu.brown.cs.systems</groupId>
+            <artifactId>tracingplane-scala-aspects</artifactId>
+            <version>${tracingplane.version}</version>
+        </dependency>
 
 
     <!--
@@ -2460,6 +2465,9 @@
                                     <arg value="-aspectpath" />
                                     <arg
                                         value="${edu.brown.cs.systems:tracingplane-aspects:jar}" />
+                                    <arg value="-aspectpath" />
+                                    <arg
+                                        value="${edu.brown.cs.systems:tracingplane-scala-aspects:jar}" />
                                     <arg value="-aspectpath" />
                                     <arg
                                         value="${edu.brown.cs.systems:xtrace-aspects:jar}" />

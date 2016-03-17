@@ -21,9 +21,12 @@ import java.nio.ByteBuffer;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
+import edu.brown.cs.systems.baggage.Baggage;
+import edu.brown.cs.systems.baggage.DetachedBaggage;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import org.apache.spark.network.protocol.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,18 +34,6 @@ import org.apache.spark.network.buffer.ManagedBuffer;
 import org.apache.spark.network.buffer.NioManagedBuffer;
 import org.apache.spark.network.client.RpcResponseCallback;
 import org.apache.spark.network.client.TransportClient;
-import org.apache.spark.network.protocol.ChunkFetchRequest;
-import org.apache.spark.network.protocol.ChunkFetchFailure;
-import org.apache.spark.network.protocol.ChunkFetchSuccess;
-import org.apache.spark.network.protocol.Encodable;
-import org.apache.spark.network.protocol.OneWayMessage;
-import org.apache.spark.network.protocol.RequestMessage;
-import org.apache.spark.network.protocol.RpcFailure;
-import org.apache.spark.network.protocol.RpcRequest;
-import org.apache.spark.network.protocol.RpcResponse;
-import org.apache.spark.network.protocol.StreamFailure;
-import org.apache.spark.network.protocol.StreamRequest;
-import org.apache.spark.network.protocol.StreamResponse;
 import org.apache.spark.network.util.NettyUtils;
 
 /**
@@ -180,11 +171,16 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
    * it will be logged and the channel closed.
    */
   private void respond(final Encodable result) {
+    final DetachedBaggage baggage = Baggage.fork();
+    if (result instanceof Message) {
+      ((Message) result).saveBaggage(baggage);
+    }
     final String remoteAddress = channel.remoteAddress().toString();
     channel.writeAndFlush(result).addListener(
       new ChannelFutureListener() {
         @Override
         public void operationComplete(ChannelFuture future) throws Exception {
+          DetachedBaggage old = Baggage.swap(baggage);
           if (future.isSuccess()) {
             logger.trace(String.format("Sent result %s to client %s", result, remoteAddress));
           } else {
@@ -192,6 +188,7 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
               result, remoteAddress), future.cause());
             channel.close();
           }
+          Baggage.swap(old);
         }
       }
     );

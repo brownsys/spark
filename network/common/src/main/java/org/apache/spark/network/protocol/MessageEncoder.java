@@ -26,6 +26,8 @@ import io.netty.handler.codec.MessageToMessageEncoder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import edu.brown.cs.systems.baggage.DetachedBaggage;
+
 /**
  * Encoder used by the server side to encode server-to-client responses.
  * This encoder is stateless so it is safe to be shared by multiple threads.
@@ -69,14 +71,18 @@ public final class MessageEncoder extends MessageToMessageEncoder<Message> {
     }
 
     Message.Type msgType = in.type();
+    DetachedBaggage baggage = in.takeSavedBaggage();
+    byte[] baggageBytes = baggage == null ? new byte[0] : baggage.toByteArray();
     // All messages have the frame length, message type, and message itself. The frame length
     // may optionally include the length of the body data, depending on what message is being
     // sent.
-    int headerLength = 8 + msgType.encodedLength() + in.encodedLength();
+    int headerLength = 8 + msgType.encodedLength() + in.encodedLength() + 4 + baggageBytes.length;
     long frameLength = headerLength + (isBodyInFrame ? bodyLength : 0);
     ByteBuf header = ctx.alloc().heapBuffer(headerLength);
     header.writeLong(frameLength);
     msgType.encode(header);
+    header.writeInt(baggageBytes.length);
+    header.writeBytes(baggageBytes);
     in.encode(header);
     assert header.writableBytes() == 0;
 

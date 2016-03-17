@@ -19,13 +19,17 @@ package org.apache.spark.rpc.netty
 
 import javax.annotation.concurrent.GuardedBy
 
+import edu.brown.cs.systems.baggage.{Baggage, DetachedBaggage}
+
 import scala.util.control.NonFatal
 
 import org.apache.spark.{Logging, SparkException}
 import org.apache.spark.rpc.{RpcAddress, RpcEndpoint, ThreadSafeRpcEndpoint}
 
 
-private[netty] sealed trait InboxMessage
+private[netty] sealed trait InboxMessage {
+  var baggage: DetachedBaggage = null;
+}
 
 private[netty] case class OneWayMessage(
     senderAddress: RpcAddress,
@@ -97,6 +101,7 @@ private[netty] class Inbox(
       }
     }
     while (true) {
+      Baggage.start(message.baggage)
       safelyCall(endpoint) {
         message match {
           case RpcMessage(_sender, content, context) =>
@@ -168,6 +173,7 @@ private[netty] class Inbox(
       // We already put "OnStop" into "messages", so we should drop further messages
       onDrop(message)
     } else {
+      message.baggage = Baggage.fork();
       messages.add(message)
       false
     }

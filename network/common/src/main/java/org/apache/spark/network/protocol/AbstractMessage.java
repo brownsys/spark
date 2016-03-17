@@ -19,6 +19,8 @@ package org.apache.spark.network.protocol;
 
 import com.google.common.base.Objects;
 
+import edu.brown.cs.systems.baggage.DetachedBaggage;
+
 import org.apache.spark.network.buffer.ManagedBuffer;
 
 /**
@@ -27,6 +29,7 @@ import org.apache.spark.network.buffer.ManagedBuffer;
 public abstract class AbstractMessage implements Message {
   private final ManagedBuffer body;
   private final boolean isBodyInFrame;
+  private volatile DetachedBaggage baggage = null;
 
   protected AbstractMessage() {
     this(null, false);
@@ -45,6 +48,20 @@ public abstract class AbstractMessage implements Message {
   @Override
   public boolean isBodyInFrame() {
     return isBodyInFrame;
+  }
+  
+  @Override
+  public void saveBaggage(DetachedBaggage baggage) {
+	this.baggage = baggage;  
+  }
+  
+  @Override
+  public DetachedBaggage takeSavedBaggage() {
+	try {
+		return this.baggage; 
+	} finally {
+		this.baggage = null;
+	}
   }
 
   protected boolean equals(AbstractMessage other) {

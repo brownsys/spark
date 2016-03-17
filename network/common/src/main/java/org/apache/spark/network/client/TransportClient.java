@@ -24,18 +24,8 @@ import java.nio.ByteBuffer;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import javax.annotation.Nullable;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Objects;
-import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
-import com.google.common.util.concurrent.SettableFuture;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import javax.annotation.Nullable;
 
 import org.apache.spark.network.buffer.NioManagedBuffer;
 import org.apache.spark.network.protocol.ChunkFetchRequest;
@@ -44,6 +34,20 @@ import org.apache.spark.network.protocol.RpcRequest;
 import org.apache.spark.network.protocol.StreamChunkId;
 import org.apache.spark.network.protocol.StreamRequest;
 import org.apache.spark.network.util.NettyUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
+import com.google.common.util.concurrent.SettableFuture;
+
+import edu.brown.cs.systems.baggage.Baggage;
+import edu.brown.cs.systems.baggage.DetachedBaggage;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 
 /**
  * Client for fetching consecutive chunks of a pre-negotiated stream. This API is intended to allow
@@ -142,7 +146,10 @@ public class TransportClient implements Closeable {
     final StreamChunkId streamChunkId = new StreamChunkId(streamId, chunkIndex);
     handler.addFetchRequest(streamChunkId, callback);
 
-    channel.writeAndFlush(new ChunkFetchRequest(streamChunkId)).addListener(
+    ChunkFetchRequest chunkFetchRequest = new ChunkFetchRequest(streamChunkId);
+    final DetachedBaggage baggage = Baggage.fork();
+    chunkFetchRequest.saveBaggage(baggage);
+    channel.writeAndFlush(chunkFetchRequest).addListener(
       new ChannelFutureListener() {
         @Override
         public void operationComplete(ChannelFuture future) throws Exception {
@@ -182,10 +189,14 @@ public class TransportClient implements Closeable {
     // when responses arrive.
     synchronized (this) {
       handler.addStreamCallback(callback);
-      channel.writeAndFlush(new StreamRequest(streamId)).addListener(
+      StreamRequest streamRequest = new StreamRequest(streamId);
+      final DetachedBaggage baggage = Baggage.fork(); 
+      streamRequest.saveBaggage(baggage);
+      channel.writeAndFlush(streamRequest).addListener(
         new ChannelFutureListener() {
           @Override
           public void operationComplete(ChannelFuture future) throws Exception {
+        	DetachedBaggage old = Baggage.swap(baggage);
             if (future.isSuccess()) {
               long timeTaken = System.currentTimeMillis() - startTime;
               logger.trace("Sending request for {} to {} took {} ms", streamId, serverAddr,
@@ -201,6 +212,7 @@ public class TransportClient implements Closeable {
                 logger.error("Uncaught exception in RPC response callback handler!", e);
               }
             }
+            Baggage.start(old);
           }
         });
     }
@@ -222,10 +234,14 @@ public class TransportClient implements Closeable {
     final long requestId = Math.abs(UUID.randomUUID().getLeastSignificantBits());
     handler.addRpcRequest(requestId, callback);
 
-    channel.writeAndFlush(new RpcRequest(requestId, new NioManagedBuffer(message))).addListener(
+    RpcRequest rpcRequest = new RpcRequest(requestId, new NioManagedBuffer(message));
+    final DetachedBaggage rpcBaggage = Baggage.fork();
+    rpcRequest.saveBaggage(rpcBaggage);
+    channel.writeAndFlush(rpcRequest).addListener(
       new ChannelFutureListener() {
         @Override
         public void operationComplete(ChannelFuture future) throws Exception {
+          DetachedBaggage old = Baggage.swap(rpcBaggage);
           if (future.isSuccess()) {
             long timeTaken = System.currentTimeMillis() - startTime;
             logger.trace("Sending request {} to {} took {} ms", requestId, serverAddr, timeTaken);
@@ -241,6 +257,8 @@ public class TransportClient implements Closeable {
               logger.error("Uncaught exception in RPC response callback handler!", e);
             }
           }
+          Baggage.stop();
+          Baggage.start(old);
         }
       });
 
@@ -282,7 +300,9 @@ public class TransportClient implements Closeable {
    * @param message The message to send.
    */
   public void send(ByteBuffer message) {
-    channel.writeAndFlush(new OneWayMessage(new NioManagedBuffer(message)));
+	OneWayMessage oneWayMessage = new OneWayMessage(new NioManagedBuffer(message));
+	oneWayMessage.saveBaggage(Baggage.fork());
+    channel.writeAndFlush(oneWayMessage);
   }
 
   /**

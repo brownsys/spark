@@ -17,19 +17,20 @@
 
 package org.apache.spark.network.server;
 
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.handler.timeout.IdleState;
-import io.netty.handler.timeout.IdleStateEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.spark.network.client.TransportClient;
 import org.apache.spark.network.client.TransportResponseHandler;
 import org.apache.spark.network.protocol.Message;
 import org.apache.spark.network.protocol.RequestMessage;
 import org.apache.spark.network.protocol.ResponseMessage;
 import org.apache.spark.network.util.NettyUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import edu.brown.cs.systems.baggage.Baggage;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.timeout.IdleState;
+import io.netty.handler.timeout.IdleStateEvent;
 
 /**
  * The single Transport-level Channel handler which is used for delegating requests to the
@@ -100,11 +101,13 @@ public class TransportChannelHandler extends SimpleChannelInboundHandler<Message
 
   @Override
   public void channelRead0(ChannelHandlerContext ctx, Message request) throws Exception {
+	Baggage.start(request.takeSavedBaggage());
     if (request instanceof RequestMessage) {
       requestHandler.handle((RequestMessage) request);
     } else {
       responseHandler.handle((ResponseMessage) request);
     }
+    Baggage.stop();
   }
 
   /** Triggered based on events from an {@link io.netty.handler.timeout.IdleStateHandler}. */

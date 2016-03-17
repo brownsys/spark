@@ -20,6 +20,8 @@ package org.apache.spark.rpc.netty
 import java.util.concurrent.{ThreadPoolExecutor, ConcurrentHashMap, LinkedBlockingQueue, TimeUnit}
 import javax.annotation.concurrent.GuardedBy
 
+import edu.brown.cs.systems.baggage.Baggage
+
 import scala.collection.JavaConverters._
 import scala.concurrent.Promise
 import scala.util.control.NonFatal
@@ -205,6 +207,7 @@ private[netty] class Dispatcher(nettyEnv: NettyRpcEnv) extends Logging {
     override def run(): Unit = {
       try {
         while (true) {
+          Baggage.discard();
           try {
             val data = receivers.take()
             if (data == PoisonPill) {

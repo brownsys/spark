@@ -21,6 +21,8 @@ import java.nio.ByteBuffer
 import java.util.concurrent.Callable
 import javax.annotation.concurrent.GuardedBy
 
+import edu.brown.cs.systems.baggage.{Baggage, DetachedBaggage}
+
 import scala.util.control.NonFatal
 
 import org.apache.spark.{Logging, SparkException}
@@ -28,6 +30,8 @@ import org.apache.spark.network.client.{RpcResponseCallback, TransportClient}
 import org.apache.spark.rpc.RpcAddress
 
 private[netty] sealed trait OutboxMessage {
+
+  var baggage: DetachedBaggage = null
 
   def sendWith(client: TransportClient): Unit
 
@@ -112,6 +116,7 @@ private[netty] class Outbox(nettyEnv: NettyRpcEnv, val address: RpcAddress) {
       if (stopped) {
         true
       } else {
+        message.baggage = Baggage.fork();
         messages.add(message)
         false
       }
@@ -119,7 +124,9 @@ private[netty] class Outbox(nettyEnv: NettyRpcEnv, val address: RpcAddress) {
     if (dropped) {
       message.onFailure(new SparkException("Message is dropped because Outbox is stopped"))
     } else {
+      val baggage: DetachedBaggage = Baggage.stop()
       drainOutbox()
+      Baggage.start(baggage)
     }
   }
 
@@ -154,6 +161,7 @@ private[netty] class Outbox(nettyEnv: NettyRpcEnv, val address: RpcAddress) {
       draining = true
     }
     while (true) {
+      Baggage.start(message.baggage);
       try {
         val _client = synchronized { client }
         if (_client != null) {

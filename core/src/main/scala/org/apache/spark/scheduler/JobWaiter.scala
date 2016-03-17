@@ -17,6 +17,8 @@
 
 package org.apache.spark.scheduler
 
+import edu.brown.cs.systems.baggage.{Baggage, DetachedBaggage}
+
 /**
  * An object that waits for a DAGScheduler job to complete. As tasks finish, it passes their
  * results to the given handler function.
@@ -35,6 +37,7 @@ private[spark] class JobWaiter[T](
   private var _jobFinished = totalTasks == 0
 
   def jobFinished: Boolean = _jobFinished
+  private var baggage: DetachedBaggage = null
 
   // If the job is finished, this will be its result. In the case of 0 task jobs (e.g. zero
   // partition RDDs), we set the jobResult directly to JobSucceeded.
@@ -58,6 +61,7 @@ private[spark] class JobWaiter[T](
     if (finishedTasks == totalTasks) {
       _jobFinished = true
       jobResult = JobSucceeded
+      baggage = Baggage.fork()
       this.notifyAll()
     }
   }
@@ -65,6 +69,7 @@ private[spark] class JobWaiter[T](
   override def jobFailed(exception: Exception): Unit = synchronized {
     _jobFinished = true
     jobResult = JobFailed(exception)
+    baggage = Baggage.fork()
     this.notifyAll()
   }
 
@@ -72,6 +77,7 @@ private[spark] class JobWaiter[T](
     while (!_jobFinished) {
       this.wait()
     }
+    Baggage.join(baggage)
     return jobResult
   }
 }

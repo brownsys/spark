@@ -79,5 +79,19 @@
   <build>
     <outputDirectory>target/scala-${scala.binary.version}/classes</outputDirectory>
     <testOutputDirectory>target/scala-${scala.binary.version}/test-classes</testOutputDirectory>
+
+    <plugins>
+      <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-antrun-plugin</artifactId>
+          <version>1.8</version>
+          <executions>
+              <execution>
+                  <id>compile</id>
+                  <phase />
+              </execution>
+          </executions>
+      </plugin>
+    </plugins>
   </build>
 </project>

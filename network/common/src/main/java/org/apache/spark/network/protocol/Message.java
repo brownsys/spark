@@ -21,6 +21,8 @@ import io.netty.buffer.ByteBuf;
 
 import org.apache.spark.network.buffer.ManagedBuffer;
 
+import edu.brown.cs.systems.baggage.DetachedBaggage;
+
 /** An on-the-wire transmittable message. */
 public interface Message extends Encodable {
   /** Used to identify this request type. */
@@ -31,6 +33,10 @@ public interface Message extends Encodable {
 
   /** Whether to include the body of the message in the same frame as the message. */
   boolean isBodyInFrame();
+  
+  void saveBaggage(DetachedBaggage baggage);
+  
+  DetachedBaggage takeSavedBaggage();
 
   /** Preceding every serialized Message is its type, which allows us to deserialize it. */
   public static enum Type implements Encodable {

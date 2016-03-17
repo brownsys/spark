@@ -20,6 +20,8 @@ package org.apache.spark.util
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{BlockingQueue, LinkedBlockingDeque}
 
+import edu.brown.cs.systems.tracing.aspects.Annotations.InstrumentQueues
+
 import scala.util.control.NonFatal
 
 import org.apache.spark.Logging
@@ -31,6 +33,7 @@ import org.apache.spark.Logging
  * Note: The event queue will grow indefinitely. So subclasses should make sure `onReceive` can
  * handle events in time to avoid the potential OOM.
  */
+@InstrumentQueues
 private[spark] abstract class EventLoop[E](name: String) extends Logging {
 
   private val eventQueue: BlockingQueue[E] = new LinkedBlockingDeque[E]()

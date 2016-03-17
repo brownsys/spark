@@ -19,6 +19,8 @@ package org.apache.spark.scheduler
 
 import java.util.Properties
 
+import edu.brown.cs.systems.tracing.aspects.Annotations.InstrumentedQueueElement
+
 import scala.collection.Map
 import scala.language.existentials
 
@@ -33,6 +35,7 @@ import org.apache.spark.util.CallSite
  * submitted) but there is a single "logic" thread that reads these events and takes decisions.
  * This greatly simplifies synchronization.
  */
+@InstrumentedQueueElement
 private[scheduler] sealed trait DAGSchedulerEvent
 
 /** A result-yielding job was submitted on a target RDD */

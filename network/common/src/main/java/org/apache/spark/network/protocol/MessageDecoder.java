@@ -19,12 +19,14 @@ package org.apache.spark.network.protocol;
 
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import edu.brown.cs.systems.baggage.Baggage;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.MessageToMessageDecoder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Decoder used by the client side to encode server-to-client responses.
@@ -37,9 +39,17 @@ public final class MessageDecoder extends MessageToMessageDecoder<ByteBuf> {
   @Override
   public void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
     Message.Type msgType = Message.Type.decode(in);
+    
+    // Join baggage
+    byte[] baggageBytes = new byte[in.readInt()];
+    in.readBytes(baggageBytes);
+    Baggage.start(baggageBytes);
+    
     Message decoded = decode(msgType, in);
     assert decoded.type() == msgType;
     logger.trace("Received message " + msgType + ": " + decoded);
+    
+    decoded.saveBaggage(Baggage.stop());
     out.add(decoded);
   }
 
