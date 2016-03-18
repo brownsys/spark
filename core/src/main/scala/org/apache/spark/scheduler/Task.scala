@@ -20,6 +20,8 @@ package org.apache.spark.scheduler
 import java.io.{ByteArrayOutputStream, DataInputStream, DataOutputStream}
 import java.nio.ByteBuffer
 
+import edu.brown.cs.systems.baggage.DetachedBaggage
+
 import scala.collection.mutable.HashMap
 
 import org.apache.spark.metrics.MetricsSystem

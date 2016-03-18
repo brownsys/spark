@@ -22,6 +22,8 @@ import java.util.Properties
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
+import edu.brown.cs.systems.baggage.{DetachedBaggage, Baggage}
+
 import scala.collection.Map
 import scala.collection.mutable.{HashMap, HashSet, Stack}
 import scala.concurrent.duration._
@@ -550,11 +552,9 @@ class DAGScheduler(
    * @param callSite where in the user program this job was called
    * @param resultHandler callback to pass each result to
    * @param properties scheduler properties to attach to this job, e.g. fair scheduler pool name
-   *
-   * @return a JobWaiter object that can be used to block until the job finishes executing
+    * @return a JobWaiter object that can be used to block until the job finishes executing
    *         or can be used to cancel the job.
-   *
-   * @throws IllegalArgumentException when partitions ids are illegal
+    * @throws IllegalArgumentException when partitions ids are illegal
    */
   def submitJob[T, U](
       rdd: RDD[T],
@@ -597,8 +597,7 @@ class DAGScheduler(
    * @param callSite where in the user program this job was called
    * @param resultHandler callback to pass each result to
    * @param properties scheduler properties to attach to this job, e.g. fair scheduler pool name
-   *
-   * @throws Exception when the job fails
+    * @throws Exception when the job fails
    */
   def runJob[T, U](
       rdd: RDD[T],
@@ -858,6 +857,8 @@ class DAGScheduler(
     val stageInfos = stageIds.flatMap(id => stageIdToStage.get(id).map(_.latestInfo))
     listenerBus.post(
       SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
+
+    finalStage.baggage = Baggage.stop()
     submitStage(finalStage)
 
     submitWaitingStages()
@@ -898,6 +899,8 @@ class DAGScheduler(
     val stageInfos = stageIds.flatMap(id => stageIdToStage.get(id).map(_.latestInfo))
     listenerBus.post(
       SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
+
+    finalStage.baggage = Baggage.stop()
     submitStage(finalStage)
 
     // If the whole stage has already finished, tell the listener and remove it
@@ -910,6 +913,7 @@ class DAGScheduler(
 
   /** Submits stage, but first recursively submits any missing parents. */
   private def submitStage(stage: Stage) {
+    Baggage.start(stage.baggage)
     val jobId = activeJobForStage(stage)
     if (jobId.isDefined) {
       logDebug("submitStage(" + stage + ")")
@@ -919,20 +923,33 @@ class DAGScheduler(
         if (missing.isEmpty) {
           logInfo("Submitting " + stage + " (" + stage.rdd + "), which has no missing parents")
           submitMissingTasks(stage, jobId.get)
+          stage.baggage = Baggage.stop()
         } else {
+          stage.baggage = Baggage.stop()
           for (parent <- missing) {
             submitStage(parent)
           }
           waitingStages += stage
         }
+      } else {
+        stage.baggage = Baggage.stop()
       }
     } else {
       abortStage(stage, "No active job for stage " + stage.id, None)
+      stage.baggage = Baggage.stop()
     }
   }
 
   /** Called when stage's parents are available and we can now do its task. */
   private def submitMissingTasks(stage: Stage, jobId: Int) {
+
+    /** Join parent stage baggages */
+    stage.parents.foreach(parentStage => {
+      if (parentStage.firstJobId == stage.firstJobId) {
+        Baggage.join(parentStage.baggage)
+      }
+    })
+
     logDebug("submitMissingTasks(" + stage + ")")
     // Get our pending tasks and remember them in our pendingTasks entry
     stage.pendingPartitions.clear()
@@ -1135,6 +1152,7 @@ class DAGScheduler(
     }
 
     val stage = stageIdToStage(task.stageId)
+    Baggage.join(stage.baggage)
     event.reason match {
       case Success =>
         listenerBus.post(SparkListenerTaskEnd(stageId, stage.latestInfo.attemptId, taskType,
@@ -1211,7 +1229,9 @@ class DAGScheduler(
                 logInfo("Resubmitting " + shuffleStage + " (" + shuffleStage.name +
                   ") because some of its tasks had failed: " +
                   shuffleStage.findMissingPartitions().mkString(", "))
+                shuffleStage.baggage = Baggage.stop()
                 submitStage(shuffleStage)
+                Baggage.start(shuffleStage.baggage)
               } else {
                 // Mark any map-stage jobs waiting on this stage as finished
                 if (shuffleStage.mapStageJobs.nonEmpty) {
@@ -1296,6 +1316,7 @@ class DAGScheduler(
         // Unrecognized failure - also do nothing. If the task fails repeatedly, the TaskScheduler
         // will abort the job.
     }
+    stage.baggage = Baggage.stop()
     submitWaitingStages()
   }
 

@@ -17,6 +17,8 @@
 
 package org.apache.spark.scheduler
 
+import edu.brown.cs.systems.baggage.{Baggage, DetachedBaggage}
+
 import scala.collection.mutable.HashSet
 
 import org.apache.spark._
@@ -65,6 +67,9 @@ private[scheduler] abstract class Stage(
 
   /** Set of jobs that this stage belongs to. */
   val jobIds = new HashSet[Int]
+
+  /** Baggage for completed tasks of this stage.  For now baggage only belongs to the first job */
+  var baggage: DetachedBaggage = Baggage.fork()
 
   val pendingPartitions = new HashSet[Int]
 
