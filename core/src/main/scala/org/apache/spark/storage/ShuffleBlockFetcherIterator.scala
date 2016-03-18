@@ -20,6 +20,8 @@ package org.apache.spark.storage
 import java.io.InputStream
 import java.util.concurrent.LinkedBlockingQueue
 
+import edu.brown.cs.systems.tracing.aspects.Annotations.{InstrumentQueues, InstrumentedQueueElement}
+
 import scala.collection.mutable.{ArrayBuffer, HashSet, Queue}
 import scala.util.control.NonFatal
 
@@ -47,6 +49,7 @@ import org.apache.spark.util.Utils
  *                        order to throttle the memory usage.
  * @param maxBytesInFlight max size (in bytes) of remote blocks to fetch at any given point.
  */
+@InstrumentQueues
 private[spark]
 final class ShuffleBlockFetcherIterator(
     context: TaskContext,
@@ -367,7 +370,8 @@ object ShuffleBlockFetcherIterator {
 
   /**
    * A request to fetch blocks from a remote BlockManager.
-   * @param address remote BlockManager to fetch from.
+    *
+    * @param address remote BlockManager to fetch from.
    * @param blocks Sequence of tuple, where the first element is the block id,
    *               and the second element is the estimated size, used to calculate bytesInFlight.
    */
@@ -378,6 +382,7 @@ object ShuffleBlockFetcherIterator {
   /**
    * Result of a fetch from a remote block.
    */
+  @InstrumentedQueueElement
   private[storage] sealed trait FetchResult {
     val blockId: BlockId
     val address: BlockManagerId
@@ -385,7 +390,8 @@ object ShuffleBlockFetcherIterator {
 
   /**
    * Result of a fetch from a remote block successfully.
-   * @param blockId block id
+    *
+    * @param blockId block id
    * @param address BlockManager that the block was fetched from.
    * @param size estimated size of the block, used to calculate bytesInFlight.
    *             Note that this is NOT the exact bytes.
@@ -403,7 +409,8 @@ object ShuffleBlockFetcherIterator {
 
   /**
    * Result of a fetch from a remote block unsuccessfully.
-   * @param blockId block id
+    *
+    * @param blockId block id
    * @param address BlockManager that the block was attempted to be fetched from
    * @param e the failure exception
    */
