@@ -200,9 +200,9 @@
     -->
     <spark.test.home>${session.executionRootDirectory}</spark.test.home>
 
-    <PermGen>64m</PermGen>
-    <MaxPermGen>512m</MaxPermGen>
-    <CodeCacheSize>512m</CodeCacheSize>
+    <PermGen>512m</PermGen>
+    <MaxPermGen>2048m</MaxPermGen>
+    <CodeCacheSize>2048m</CodeCacheSize>
 
     <aspectj.version>1.8.7</aspectj.version>
     <tracingplane.version>4.0</tracingplane.version>
@@ -2012,8 +2012,8 @@
               <arg>-feature</arg>
             </args>
             <jvmArgs>
-              <jvmArg>-Xms1024m</jvmArg>
-              <jvmArg>-Xmx1024m</jvmArg>
+              <jvmArg>-Xms4096m</jvmArg>
+              <jvmArg>-Xmx4096m</jvmArg>
               <jvmArg>-XX:PermSize=${PermGen}</jvmArg>
               <jvmArg>-XX:MaxPermSize=${MaxPermGen}</jvmArg>
               <jvmArg>-XX:ReservedCodeCacheSize=${CodeCacheSize}</jvmArg>
