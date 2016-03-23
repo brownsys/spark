@@ -2010,6 +2010,8 @@
               <arg>-unchecked</arg>
               <arg>-deprecation</arg>
               <arg>-feature</arg>
+              <arg>-Xmax-classfile-name</arg>
+              <arg>128</arg>
             </args>
             <jvmArgs>
               <jvmArg>-Xms4096m</jvmArg>
