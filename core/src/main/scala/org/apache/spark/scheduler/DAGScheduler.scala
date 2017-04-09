@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 import edu.brown.cs.systems.baggage.{DetachedBaggage, Baggage}
+import edu.brown.cs.systems.xtrace.XTrace
 
 import scala.collection.Map
 import scala.collection.mutable.{HashMap, HashSet, Stack}
@@ -1153,6 +1154,7 @@ class DAGScheduler(
 
     val stage = stageIdToStage(task.stageId)
     Baggage.join(stage.baggage)
+    logInfo("task completed")
     event.reason match {
       case Success =>
         listenerBus.post(SparkListenerTaskEnd(stageId, stage.latestInfo.attemptId, taskType,
@@ -1685,4 +1687,6 @@ private[spark] object DAGScheduler {
   // this is a simplistic way to avoid resubmitting tasks in the non-fetchable map stage one by one
   // as more failure events come in
   val RESUBMIT_TIMEOUT = 200
+
+  val xtrace = XTrace.getLogger("DAGScheduler")
 }

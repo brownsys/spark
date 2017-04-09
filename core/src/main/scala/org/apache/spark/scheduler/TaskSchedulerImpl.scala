@@ -189,6 +189,7 @@ private[spark] class TaskSchedulerImpl(
         }, STARVATION_TIMEOUT_MS, STARVATION_TIMEOUT_MS)
       }
       hasReceivedTask = true
+      manager.saveBaggage()
     }
     backend.reviveOffers()
   }
