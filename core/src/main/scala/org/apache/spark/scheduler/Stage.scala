@@ -72,6 +72,7 @@ private[scheduler] abstract class Stage(
 //  var baggage: DetachedBaggage = Baggage.fork()
 
   /** Baggage of when this stage has completed */
+  var submissionBaggage: DetachedBaggage = null;
   var completionBaggage: DetachedBaggage = null;
 
   val pendingPartitions = new HashSet[Int]

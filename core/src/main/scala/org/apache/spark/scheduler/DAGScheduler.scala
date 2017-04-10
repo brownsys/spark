@@ -1088,6 +1088,7 @@ class DAGScheduler(
       taskScheduler.submitTasks(new TaskSet(
         tasks.toArray, stage.id, stage.latestInfo.attemptId, jobId, properties))
       stage.latestInfo.submissionTime = Some(clock.getTimeMillis())
+      stage.submissionBaggage = Baggage.take()
     } else {
       // Because we posted SparkListenerStageSubmitted earlier, we should mark
       // the stage as completed here in case there are no tasks to run
@@ -1333,7 +1334,9 @@ class DAGScheduler(
         // Unrecognized failure - also do nothing. If the task fails repeatedly, the TaskScheduler
         // will abort the job.
     }
-    stage.completionBaggage = Baggage.stop()
+    val completionBaggage = Baggage.stop()
+    stage.completionBaggage = edu.brown.cs.systems.tracingplane.baggage_buffers.BaggageBuffers.compact(
+      stage.submissionBaggage.baggage, completionBaggage.baggage)
     submitWaitingStages()
   }
 
