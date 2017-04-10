@@ -1088,7 +1088,7 @@ class DAGScheduler(
       taskScheduler.submitTasks(new TaskSet(
         tasks.toArray, stage.id, stage.latestInfo.attemptId, jobId, properties))
       stage.latestInfo.submissionTime = Some(clock.getTimeMillis())
-      stage.submissionBaggage = Baggage.take()
+      stage.submissionBaggage = Baggage.stop()
     } else {
       // Because we posted SparkListenerStageSubmitted earlier, we should mark
       // the stage as completed here in case there are no tasks to run
