@@ -1335,8 +1335,9 @@ class DAGScheduler(
         // will abort the job.
     }
     val completionBaggage = Baggage.stop()
-    stage.completionBaggage = edu.brown.cs.systems.tracingplane.baggage_buffers.BaggageBuffers.compact(
-      stage.submissionBaggage.baggage, completionBaggage.baggage)
+    Baggage.start(stage.submissionBaggage)
+    edu.brown.cs.systems.tracingplane.baggage_buffers.BaggageBuffers.compact(completionBaggage.baggage)
+    stage.completionBaggage = Baggage.stop()
     submitWaitingStages()
   }
 
