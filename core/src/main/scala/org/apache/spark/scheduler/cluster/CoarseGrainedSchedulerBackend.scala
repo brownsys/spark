@@ -20,6 +20,8 @@ package org.apache.spark.scheduler.cluster
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
+import edu.brown.cs.systems.baggage.Baggage
+
 import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 
 import org.apache.spark.rpc._
@@ -222,7 +224,10 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
     // Launch tasks returned by a set of resource offers
     private def launchTasks(tasks: Seq[Seq[TaskDescription]]) {
+      val baggagePre = Baggage.stop()
       for (task <- tasks.flatten) {
+        Baggage.start(task.baggage)
+        task.baggage = null
         val serializedTask = ser.serialize(task)
         if (serializedTask.limit >= akkaFrameSize - AkkaUtils.reservedSizeBytes) {
           scheduler.taskIdToTaskSetManager.get(task.taskId).foreach { taskSetMgr =>
@@ -243,7 +248,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
           executorData.freeCores -= scheduler.CPUS_PER_TASK
           executorData.executorEndpoint.send(LaunchTask(new SerializableBuffer(serializedTask)))
         }
+        Baggage.discard()
       }
+      Baggage.start(baggagePre)
     }
 
     // Remove a disconnected slave from the cluster
@@ -386,6 +393,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
   /**
    * Request an additional number of executors from the cluster manager.
+ *
    * @return whether the request is acknowledged.
    */
   final override def requestExecutors(numAdditionalExecutors: Int): Boolean = synchronized {
@@ -406,6 +414,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
   /**
    * Update the cluster manager on our scheduling needs. Three bits of information are included
    * to help it make decisions.
+ *
    * @param numExecutors The total number of executors we'd like to have. The cluster manager
    *                     shouldn't kill any running executor to reach this number, but,
    *                     if all existing executors were to die, this is the number of executors
@@ -452,6 +461,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
   /**
    * Request that the cluster manager kill the specified executors.
+ *
    * @return whether the kill request is acknowledged.
    */
   final override def killExecutors(executorIds: Seq[String]): Boolean = synchronized {
@@ -502,6 +512,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
 
   /**
    * Kill the given list of executors through the cluster manager.
+ *
    * @return whether the kill request is acknowledged.
    */
   protected def doKillExecutors(executorIds: Seq[String]): Boolean = false

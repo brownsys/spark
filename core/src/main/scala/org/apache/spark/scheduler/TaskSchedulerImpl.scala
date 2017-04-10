@@ -22,6 +22,8 @@ import java.util.{TimerTask, Timer}
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
+import edu.brown.cs.systems.baggage.{DetachedBaggage, Baggage}
+
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
@@ -189,8 +191,8 @@ private[spark] class TaskSchedulerImpl(
         }, STARVATION_TIMEOUT_MS, STARVATION_TIMEOUT_MS)
       }
       hasReceivedTask = true
-      manager.saveBaggage()
     }
+    Baggage.stop()
     backend.reviveOffers()
   }
 
@@ -301,6 +303,7 @@ private[spark] class TaskSchedulerImpl(
     val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.cores))
     val availableCpus = shuffledOffers.map(o => o.cores).toArray
     val sortedTaskSets = rootPool.getSortedTaskSetQueue
+
     for (taskSet <- sortedTaskSets) {
       logDebug("parentName: %s, name: %s, runningTasks: %s".format(
         taskSet.parent.name, taskSet.name, taskSet.runningTasks))
@@ -370,6 +373,7 @@ private[spark] class TaskSchedulerImpl(
     // Update the DAGScheduler without holding a lock on this, since that can deadlock
     if (failedExecutor.isDefined) {
       dagScheduler.executorLost(failedExecutor.get)
+      Baggage.stop()
       backend.reviveOffers()
     }
   }
@@ -414,6 +418,7 @@ private[spark] class TaskSchedulerImpl(
     if (!taskSetManager.isZombie && taskState != TaskState.KILLED) {
       // Need to revive offers again now that the task set manager state has been updated to
       // reflect failed tasks that need to be re-run.
+      Baggage.stop()
       backend.reviveOffers()
     }
   }
@@ -461,6 +466,7 @@ private[spark] class TaskSchedulerImpl(
       shouldRevive = rootPool.checkSpeculatableTasks()
     }
     if (shouldRevive) {
+      Baggage.stop()
       backend.reviveOffers()
     }
   }
@@ -495,6 +501,7 @@ private[spark] class TaskSchedulerImpl(
     // Call dagScheduler.executorLost without holding the lock on this to prevent deadlock
     if (failedExecutor.isDefined) {
       dagScheduler.executorLost(failedExecutor.get)
+      Baggage.stop()
       backend.reviveOffers()
     }
   }

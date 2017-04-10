@@ -19,6 +19,7 @@ package org.apache.spark.scheduler
 
 import java.nio.ByteBuffer
 
+import edu.brown.cs.systems.baggage.DetachedBaggage
 import org.apache.spark.util.SerializableBuffer
 
 /**
@@ -36,6 +37,8 @@ private[spark] class TaskDescription(
 
   // Because ByteBuffers are not serializable, wrap the task in a SerializableBuffer
   private val buffer = new SerializableBuffer(_serializedTask)
+
+  @transient var baggage: DetachedBaggage = null
 
   def serializedTask: ByteBuffer = buffer.value
 

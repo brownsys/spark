@@ -19,6 +19,7 @@ package org.apache.spark.scheduler
 
 import java.util.Properties
 
+import edu.brown.cs.systems.baggage.DetachedBaggage
 import org.apache.spark.TaskContext
 import org.apache.spark.util.CallSite
 
@@ -47,6 +48,8 @@ private[spark] class ActiveJob(
     val callSite: CallSite,
     val listener: JobListener,
     val properties: Properties) {
+
+  var baggage: DetachedBaggage = null
 
   /**
    * Number of partitions we need to compute for this job. Note that result stages may not need

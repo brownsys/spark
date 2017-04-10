@@ -59,17 +59,7 @@ private[spark] class TaskSetManager(
                                      clock: Clock = new SystemClock())
   extends Schedulable with Logging {
 
-  TaskSetManager.xtrace.log("Created TaskSetManager for " + taskSet.toString)
-
-  var baggage: DetachedBaggage = null
-
-  def resumeBaggage(): Unit = {
-    Baggage.join(baggage)
-  }
-
-  def saveBaggage(): Unit = {
-    baggage = Baggage.fork()
-  }
+  var baggage: DetachedBaggage = Baggage.fork()
 
 
   val conf = sched.sc.conf
@@ -439,8 +429,10 @@ private[spark] class TaskSetManager(
                      maxLocality: TaskLocality.TaskLocality)
   : Option[TaskDescription] = {
     if (!isZombie) {
-      resumeBaggage()
+      val priorBaggage = Baggage.stop()
+      Baggage.join(baggage)
       try {
+        logInfo(s"resource offer for executor $execId on host $host")
         val curTime = clock.getTimeMillis()
 
         var allowedLocality = maxLocality
@@ -500,14 +492,17 @@ private[spark] class TaskSetManager(
             logInfo(s"Starting $taskName (TID $taskId, $host, partition ${task.partitionId}," +
               s"$taskLocality, ${serializedTask.limit} bytes)")
 
+            val description = new TaskDescription(taskId = taskId, attemptNumber = attemptNum,
+              execId, taskName, index, serializedTask)
+            description.baggage = Baggage.fork()
             sched.dagScheduler.taskStarted(task, info)
-            return Some(new TaskDescription(taskId = taskId, attemptNumber = attemptNum, execId,
-              taskName, index, serializedTask))
+            return Some(description)
           }
           case _ =>
         }
       } finally {
-        saveBaggage()
+        baggage = Baggage.stop()
+        Baggage.start(priorBaggage)
       }
     }
     None
@@ -602,11 +597,9 @@ private[spark] class TaskSetManager(
     * Marks the task as getting result and notifies the DAG Scheduler
     */
   def handleTaskGettingResult(tid: Long): Unit = {
-    resumeBaggage()
     val info = taskInfos(tid)
     info.markGettingResult()
     sched.dagScheduler.taskGettingResult(info)
-    saveBaggage()
   }
 
   /**
@@ -631,38 +624,35 @@ private[spark] class TaskSetManager(
     * Marks the task as successful and notifies the DAGScheduler that a task has ended.
     */
   def handleSuccessfulTask(tid: Long, result: DirectTaskResult[_]): Unit = {
-    resumeBaggage()
-    try {
-      val info = taskInfos(tid)
-      val index = info.index
-      info.markSuccessful()
-      removeRunningTask(tid)
-      // This method is called by "TaskSchedulerImpl.handleSuccessfulTask" which holds the
-      // "TaskSchedulerImpl" lock until exiting. To avoid the SPARK-7655 issue, we should not
-      // "deserialize" the value when holding a lock to avoid blocking other threads. So we call
-      // "result.value()" in "TaskResultGetter.enqueueSuccessfulTask" before reaching here.
-      // Note: "result.value()" only deserializes the value when it's called at the first time, so
-      // here "result.value()" just returns the value and won't block other threads.
-      sched.dagScheduler.taskEnded(
-        tasks(index), Success, result.value(), result.accumUpdates, info, result.metrics)
-      if (!successful(index)) {
-        tasksSuccessful += 1
-        logInfo("Finished task %s in stage %s (TID %d) in %d ms on %s (%d/%d)".format(
-          info.id, taskSet.id, info.taskId, info.duration, info.host, tasksSuccessful, numTasks))
-        // Mark successful and stop if all the tasks have succeeded.
-        successful(index) = true
-        if (tasksSuccessful == numTasks) {
-          isZombie = true
-        }
-      } else {
-        logInfo("Ignoring task-finished event for " + info.id + " in stage " + taskSet.id +
-          " because task " + index + " has already completed successfully")
+    Baggage.join(baggage);
+    val info = taskInfos(tid)
+    val index = info.index
+    info.markSuccessful()
+    removeRunningTask(tid)
+    if (!successful(index)) {
+      tasksSuccessful += 1
+      logInfo("Finished task %s in stage %s (TID %d) in %d ms on %s (%d/%d)".format(
+        info.id, taskSet.id, info.taskId, info.duration, info.host, tasksSuccessful, numTasks))
+      // Mark successful and stop if all the tasks have succeeded.
+      successful(index) = true
+      if (tasksSuccessful == numTasks) {
+        isZombie = true
       }
-      failedExecutors.remove(index)
-      maybeFinishTaskSet()
-    } finally {
-      saveBaggage()
+    } else {
+      logInfo("Ignoring task-finished event for " + info.id + " in stage " + taskSet.id +
+        " because task " + index + " has already completed successfully")
     }
+    failedExecutors.remove(index)
+    maybeFinishTaskSet()
+    // This method is called by "TaskSchedulerImpl.handleSuccessfulTask" which holds the
+    // "TaskSchedulerImpl" lock until exiting. To avoid the SPARK-7655 issue, we should not
+    // "deserialize" the value when holding a lock to avoid blocking other threads. So we call
+    // "result.value()" in "TaskResultGetter.enqueueSuccessfulTask" before reaching here.
+    // Note: "result.value()" only deserializes the value when it's called at the first time, so
+    // here "result.value()" just returns the value and won't block other threads.
+    baggage = Baggage.fork()
+    sched.dagScheduler.taskEnded(
+      tasks(index), Success, result.value(), result.accumUpdates, info, result.metrics)
   }
 
   /**
@@ -670,7 +660,7 @@ private[spark] class TaskSetManager(
     * DAG Scheduler.
     */
   def handleFailedTask(tid: Long, state: TaskState, reason: TaskEndReason) {
-    resumeBaggage()
+    Baggage.join(baggage)
     try {
       val info = taskInfos(tid)
       if (info.failed) {
@@ -766,7 +756,7 @@ private[spark] class TaskSetManager(
       }
       maybeFinishTaskSet()
     } finally {
-      saveBaggage()
+      baggage = Baggage.fork()
     }
   }
 
@@ -810,41 +800,36 @@ private[spark] class TaskSetManager(
 
   /** Called by TaskScheduler when an executor is lost so we can re-enqueue our tasks */
   override def executorLost(execId: String, host: String, reason: ExecutorLossReason) {
-    resumeBaggage()
-    try {
-      // Re-enqueue any tasks that ran on the failed executor if this is a shuffle map stage,
-      // and we are not using an external shuffle server which could serve the shuffle outputs.
-      // The reason is the next stage wouldn't be able to fetch the data from this dead executor
-      // so we would need to rerun these tasks on other executors.
-      if (tasks(0).isInstanceOf[ShuffleMapTask]
-        && !env.blockManager.externalShuffleServiceEnabled) {
-        for ((tid, info) <- taskInfos if info.executorId == execId) {
-          val index = taskInfos(tid).index
-          if (successful(index)) {
-            successful(index) = false
-            copiesRunning(index) -= 1
-            tasksSuccessful -= 1
-            addPendingTask(index)
-            // Tell the DAGScheduler that this task was resubmitted so that it doesn't think our
-            // stage finishes when a total of tasks.size tasks finish.
-            sched.dagScheduler.taskEnded(tasks(index), Resubmitted, null, null, info, null)
-          }
+    // Re-enqueue any tasks that ran on the failed executor if this is a shuffle map stage,
+    // and we are not using an external shuffle server which could serve the shuffle outputs.
+    // The reason is the next stage wouldn't be able to fetch the data from this dead executor
+    // so we would need to rerun these tasks on other executors.
+    if (tasks(0).isInstanceOf[ShuffleMapTask]
+      && !env.blockManager.externalShuffleServiceEnabled) {
+      for ((tid, info) <- taskInfos if info.executorId == execId) {
+        val index = taskInfos(tid).index
+        if (successful(index)) {
+          successful(index) = false
+          copiesRunning(index) -= 1
+          tasksSuccessful -= 1
+          addPendingTask(index)
+          // Tell the DAGScheduler that this task was resubmitted so that it doesn't think our
+          // stage finishes when a total of tasks.size tasks finish.
+          sched.dagScheduler.taskEnded(tasks(index), Resubmitted, null, null, info, null)
         }
       }
-      for ((tid, info) <- taskInfos if info.running && info.executorId == execId) {
-        val exitCausedByApp: Boolean = reason match {
-          case exited: ExecutorExited => exited.exitCausedByApp
-          case ExecutorKilled => false
-          case _ => true
-        }
-        handleFailedTask(tid, TaskState.FAILED, ExecutorLostFailure(info.executorId,
-          exitCausedByApp, Some(reason.toString)))
-      }
-      // recalculate valid locality levels and waits when executor is lost
-      recomputeLocality()
-    } finally {
-      saveBaggage()
     }
+    for ((tid, info) <- taskInfos if info.running && info.executorId == execId) {
+      val exitCausedByApp: Boolean = reason match {
+        case exited: ExecutorExited => exited.exitCausedByApp
+        case ExecutorKilled => false
+        case _ => true
+      }
+      handleFailedTask(tid, TaskState.FAILED, ExecutorLostFailure(info.executorId,
+        exitCausedByApp, Some(reason.toString)))
+    }
+    // recalculate valid locality levels and waits when executor is lost
+    recomputeLocality()
   }
 
   /**
@@ -860,36 +845,31 @@ private[spark] class TaskSetManager(
     if (isZombie || numTasks == 1) {
       return false
     }
-    resumeBaggage()
-    try {
-      var foundTasks = false
-      val minFinishedForSpeculation = (SPECULATION_QUANTILE * numTasks).floor.toInt
-      logDebug("Checking for speculative tasks: minFinished = " + minFinishedForSpeculation)
-      if (tasksSuccessful >= minFinishedForSpeculation && tasksSuccessful > 0) {
-        val time = clock.getTimeMillis()
-        val durations = taskInfos.values.filter(_.successful).map(_.duration).toArray
-        Arrays.sort(durations)
-        val medianDuration = durations(min((0.5 * tasksSuccessful).round.toInt, durations.size - 1))
-        val threshold = max(SPECULATION_MULTIPLIER * medianDuration, 100)
-        // TODO: Threshold should also look at standard deviation of task durations and have a lower
-        // bound based on that.
-        logDebug("Task length threshold for speculation: " + threshold)
-        for ((tid, info) <- taskInfos) {
-          val index = info.index
-          if (!successful(index) && copiesRunning(index) == 1 && info.timeRunning(time) > threshold
-            && !speculatableTasks.contains(index)) {
-            logInfo(
-              "Marking task %d in stage %s (on %s) as speculatable because it ran more than %.0f ms"
-                .format(index, taskSet.id, info.host, threshold))
-            speculatableTasks += index
-            foundTasks = true
-          }
+    var foundTasks = false
+    val minFinishedForSpeculation = (SPECULATION_QUANTILE * numTasks).floor.toInt
+    logDebug("Checking for speculative tasks: minFinished = " + minFinishedForSpeculation)
+    if (tasksSuccessful >= minFinishedForSpeculation && tasksSuccessful > 0) {
+      val time = clock.getTimeMillis()
+      val durations = taskInfos.values.filter(_.successful).map(_.duration).toArray
+      Arrays.sort(durations)
+      val medianDuration = durations(min((0.5 * tasksSuccessful).round.toInt, durations.size - 1))
+      val threshold = max(SPECULATION_MULTIPLIER * medianDuration, 100)
+      // TODO: Threshold should also look at standard deviation of task durations and have a lower
+      // bound based on that.
+      logDebug("Task length threshold for speculation: " + threshold)
+      for ((tid, info) <- taskInfos) {
+        val index = info.index
+        if (!successful(index) && copiesRunning(index) == 1 && info.timeRunning(time) > threshold
+          && !speculatableTasks.contains(index)) {
+          logInfo(
+            "Marking task %d in stage %s (on %s) as speculatable because it ran more than %.0f ms"
+              .format(index, taskSet.id, info.host, threshold))
+          speculatableTasks += index
+          foundTasks = true
         }
       }
-      foundTasks
-    } finally {
-      saveBaggage()
     }
+    foundTasks
   }
 
   private def getLocalityWait(level: TaskLocality.TaskLocality): Long = {

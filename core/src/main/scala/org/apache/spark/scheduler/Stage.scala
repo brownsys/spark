@@ -69,7 +69,10 @@ private[scheduler] abstract class Stage(
   val jobIds = new HashSet[Int]
 
   /** Baggage for completed tasks of this stage.  For now baggage only belongs to the first job */
-  var baggage: DetachedBaggage = Baggage.fork()
+//  var baggage: DetachedBaggage = Baggage.fork()
+
+  /** Baggage of when this stage has completed */
+  var completionBaggage: DetachedBaggage = null;
 
   val pendingPartitions = new HashSet[Int]
 

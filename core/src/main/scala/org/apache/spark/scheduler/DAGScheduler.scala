@@ -736,9 +736,12 @@ class DAGScheduler(
       clearCacheLocs()
       val failedStagesCopy = failedStages.toArray
       failedStages.clear()
+      val priorBaggage = Baggage.stop()
       for (stage <- failedStagesCopy.sortBy(_.firstJobId)) {
         submitStage(stage)
+        Baggage.discard()
       }
+      Baggage.start(priorBaggage)
     }
     submitWaitingStages()
   }
@@ -859,9 +862,8 @@ class DAGScheduler(
     listenerBus.post(
       SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
 
-    finalStage.baggage = Baggage.stop()
+    job.baggage = Baggage.stop()
     submitStage(finalStage)
-
     submitWaitingStages()
   }
 
@@ -901,12 +903,14 @@ class DAGScheduler(
     listenerBus.post(
       SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
 
-    finalStage.baggage = Baggage.stop()
+    job.baggage = Baggage.stop()
     submitStage(finalStage)
 
     // If the whole stage has already finished, tell the listener and remove it
     if (finalStage.isAvailable) {
+      Baggage.start(job.baggage)
       markMapStageJobAsFinished(job, mapOutputTracker.getStatistics(dependency))
+      job.baggage = Baggage.stop()
     }
 
     submitWaitingStages()
@@ -914,7 +918,8 @@ class DAGScheduler(
 
   /** Submits stage, but first recursively submits any missing parents. */
   private def submitStage(stage: Stage) {
-    Baggage.start(stage.baggage)
+    val before = Baggage.stop()
+
     val jobId = activeJobForStage(stage)
     if (jobId.isDefined) {
       logDebug("submitStage(" + stage + ")")
@@ -922,36 +927,48 @@ class DAGScheduler(
         val missing = getMissingParentStages(stage).sortBy(_.id)
         logDebug("missing: " + missing)
         if (missing.isEmpty) {
+          // Join baggage of predecessor stages
+          if (stage.completionBaggage != null) {
+            // The stage ran already in the past; hook on to that
+            Baggage.join(stage.completionBaggage.split())
+          } else {
+            // The stage might have some parents
+            var joined = 0
+            stage.parents.foreach(parentStage => {
+              if (parentStage.firstJobId == stage.firstJobId &&
+                parentStage.completionBaggage != null) {
+                Baggage.join(parentStage.completionBaggage.split())
+                joined += 1
+              }
+            })
+
+            // If the stage had parents, they didn't belong to this job
+            if (joined == 0) {
+              val job = jobIdToActiveJob(jobId.get)
+              if (job.baggage != null) {
+                Baggage.start(job.baggage.split())
+              }
+            }
+          }
+
           logInfo("Submitting " + stage + " (" + stage.rdd + "), which has no missing parents")
           submitMissingTasks(stage, jobId.get)
-          stage.baggage = Baggage.stop()
         } else {
-          stage.baggage = Baggage.stop()
           for (parent <- missing) {
             submitStage(parent)
           }
           waitingStages += stage
         }
-      } else {
-        stage.baggage = Baggage.stop()
       }
     } else {
       abortStage(stage, "No active job for stage " + stage.id, None)
-      stage.baggage = Baggage.stop()
     }
+    Baggage.start(before)
   }
 
   /** Called when stage's parents are available and we can now do its task. */
   private def submitMissingTasks(stage: Stage, jobId: Int) {
-
-    /** Join parent stage baggages */
-    stage.parents.foreach(parentStage => {
-      if (parentStage.firstJobId == stage.firstJobId) {
-        Baggage.join(parentStage.baggage)
-      }
-    })
-
-    logDebug("submitMissingTasks(" + stage + ")")
+    logInfo("submitMissingTasks(" + stage + ")")
     // Get our pending tasks and remember them in our pendingTasks entry
     stage.pendingPartitions.clear()
 
@@ -1066,6 +1083,7 @@ class DAGScheduler(
     if (tasks.size > 0) {
       logInfo("Submitting " + tasks.size + " missing tasks from " + stage + " (" + stage.rdd + ")")
       stage.pendingPartitions ++= tasks.map(_.partitionId)
+      // TODO: Pre-compact probably goes here
       logDebug("New pending partitions: " + stage.pendingPartitions)
       taskScheduler.submitTasks(new TaskSet(
         tasks.toArray, stage.id, stage.latestInfo.attemptId, jobId, properties))
@@ -1153,8 +1171,7 @@ class DAGScheduler(
     }
 
     val stage = stageIdToStage(task.stageId)
-    Baggage.join(stage.baggage)
-    logInfo("task completed")
+    // TODO: compaction probably goes here
     event.reason match {
       case Success =>
         listenerBus.post(SparkListenerTaskEnd(stageId, stage.latestInfo.attemptId, taskType,
@@ -1231,9 +1248,7 @@ class DAGScheduler(
                 logInfo("Resubmitting " + shuffleStage + " (" + shuffleStage.name +
                   ") because some of its tasks had failed: " +
                   shuffleStage.findMissingPartitions().mkString(", "))
-                shuffleStage.baggage = Baggage.stop()
                 submitStage(shuffleStage)
-                Baggage.start(shuffleStage.baggage)
               } else {
                 // Mark any map-stage jobs waiting on this stage as finished
                 if (shuffleStage.mapStageJobs.nonEmpty) {
@@ -1318,7 +1333,7 @@ class DAGScheduler(
         // Unrecognized failure - also do nothing. If the task fails repeatedly, the TaskScheduler
         // will abort the job.
     }
-    stage.baggage = Baggage.stop()
+    stage.completionBaggage = Baggage.stop()
     submitWaitingStages()
   }
 
@@ -1626,44 +1641,84 @@ private[scheduler] class DAGSchedulerEventProcessLoop(dagScheduler: DAGScheduler
   }
 
   private def doOnReceive(event: DAGSchedulerEvent): Unit = event match {
-    case JobSubmitted(jobId, rdd, func, partitions, callSite, listener, properties) =>
+    case JobSubmitted(jobId, rdd, func, partitions, callSite, listener, properties) => {
+      logInfo(s"Handling JobSubmitted for jobId $jobId")
       dagScheduler.handleJobSubmitted(jobId, rdd, func, partitions, callSite, listener, properties)
+      logInfo(s"Finished Handling JobSubmitted for jobId $jobId")
+    }
 
-    case MapStageSubmitted(jobId, dependency, callSite, listener, properties) =>
+    case MapStageSubmitted(jobId, dependency, callSite, listener, properties) => {
+      logInfo(s"Handling MapStageSubmitted for jobId $jobId")
       dagScheduler.handleMapStageSubmitted(jobId, dependency, callSite, listener, properties)
+      logInfo(s"Finished Handling MapStageSubmitted for jobId $jobId")
+    }
 
-    case StageCancelled(stageId) =>
+    case StageCancelled(stageId) => {
+      logInfo(s"Handling StageCancelled for stageId $stageId")
       dagScheduler.handleStageCancellation(stageId)
+      logInfo(s"Finished Handling StageCancelled for stageId $stageId")
+    }
 
-    case JobCancelled(jobId) =>
+    case JobCancelled(jobId) => {
+      logInfo(s"Handling JobCancelled for jobId $jobId")
       dagScheduler.handleJobCancellation(jobId)
+      logInfo(s"Finished Handling JobCancelled for jobId $jobId")
+    }
 
-    case JobGroupCancelled(groupId) =>
+    case JobGroupCancelled(groupId) => {
+      logInfo(s"Handling JobGroupCancelled for groupId $groupId")
       dagScheduler.handleJobGroupCancelled(groupId)
+      logInfo(s"Finished Handling JobGroupCancelled for groupId $groupId")
+    }
 
-    case AllJobsCancelled =>
+    case AllJobsCancelled => {
+      logInfo(s"Handling AllJobsCancelled")
       dagScheduler.doCancelAllJobs()
+      logInfo(s"Finished Handling AllJobsCancelled")
+    }
 
-    case ExecutorAdded(execId, host) =>
+    case ExecutorAdded(execId, host) => {
+      logInfo(s"Handling ExecutorAdded for execId $execId")
       dagScheduler.handleExecutorAdded(execId, host)
+      logInfo(s"Finished Handling ExecutorAdded for execId $execId")
+    }
 
-    case ExecutorLost(execId) =>
+    case ExecutorLost(execId) => {
+      logInfo(s"Handling ExecutorLost for execId $execId")
       dagScheduler.handleExecutorLost(execId, fetchFailed = false)
+      logInfo(s"Finished Handling ExecutorLost for execId $execId")
+    }
 
-    case BeginEvent(task, taskInfo) =>
+    case BeginEvent(task, taskInfo) => {
+      logInfo(s"Handling BeginEvent for taskId ${taskInfo.taskId} stageId ${task.stageId}")
       dagScheduler.handleBeginEvent(task, taskInfo)
+      logInfo(s"Finished Handling BeginEvent for taskId ${taskInfo.taskId} stageId ${task.stageId}")
+    }
 
-    case GettingResultEvent(taskInfo) =>
+    case GettingResultEvent(taskInfo) => {
+      logInfo(s"Handling GettingResultEvent for taskId ${taskInfo.taskId}")
       dagScheduler.handleGetTaskResult(taskInfo)
+      logInfo(s"Finished Handling GettingResultEvent for taskId ${taskInfo.taskId}")
+    }
 
-    case completion @ CompletionEvent(task, reason, _, _, taskInfo, taskMetrics) =>
+    case completion @ CompletionEvent(task, reason, _, _, taskInfo, taskMetrics) => {
+      logInfo(s"Handling CompletionEvent for taskId ${taskInfo.taskId} stageId ${task.stageId}")
       dagScheduler.handleTaskCompletion(completion)
+      logInfo(s"Finished Handling CompletionEvent for taskId ${taskInfo.taskId} " +
+        s"stageId ${task.stageId}")
+    }
 
-    case TaskSetFailed(taskSet, reason, exception) =>
+    case TaskSetFailed(taskSet, reason, exception) => {
+      logInfo(s"Handling TaskSetFailed for stageId ${taskSet.stageId}")
       dagScheduler.handleTaskSetFailed(taskSet, reason, exception)
+      logInfo(s"Finished Handling TaskSetFailed for stageId ${taskSet.stageId}")
+    }
 
-    case ResubmitFailedStages =>
+    case ResubmitFailedStages => {
+      logInfo(s"Handling ResubmitFailedStages")
       dagScheduler.resubmitFailedStages()
+      logInfo(s"Finished Handling ResubmitFailedStages")
+    }
   }
 
   override def onError(e: Throwable): Unit = {
