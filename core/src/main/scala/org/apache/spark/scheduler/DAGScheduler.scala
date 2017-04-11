@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 import edu.brown.cs.systems.baggage.{DetachedBaggage, Baggage}
+import edu.brown.cs.systems.retro.Netro
 import edu.brown.cs.systems.xtrace.XTrace
 
 import scala.collection.Map
@@ -1085,6 +1086,7 @@ class DAGScheduler(
       stage.pendingPartitions ++= tasks.map(_.partitionId)
       // TODO: Pre-compact probably goes here
       logDebug("New pending partitions: " + stage.pendingPartitions)
+      Netro.set("stageId", stage.id.toString)
       taskScheduler.submitTasks(new TaskSet(
         tasks.toArray, stage.id, stage.latestInfo.attemptId, jobId, properties))
       stage.latestInfo.submissionTime = Some(clock.getTimeMillis())
@@ -1337,6 +1339,7 @@ class DAGScheduler(
     val completionBaggage = Baggage.stop()
     Baggage.start(stage.submissionBaggage)
     edu.brown.cs.systems.tracingplane.baggage_buffers.BaggageBuffers.compact(completionBaggage.baggage)
+    Netro.remove("stageId")
     stage.completionBaggage = Baggage.stop()
     submitWaitingStages()
   }

@@ -23,6 +23,8 @@ import java.util.Arrays
 import java.util.concurrent.ConcurrentLinkedQueue
 
 import edu.brown.cs.systems.baggage.{DetachedBaggage, Baggage}
+import edu.brown.cs.systems.retro.Netro
+import edu.brown.cs.systems.retro.baggage.NetroBaggage
 import edu.brown.cs.systems.xtrace.XTrace
 
 import scala.collection.mutable.ArrayBuffer
@@ -495,6 +497,8 @@ private[spark] class TaskSetManager(
             val description = new TaskDescription(taskId = taskId, attemptNumber = attemptNum,
               execId, taskName, index, serializedTask)
             description.baggage = Baggage.fork()
+            description.baggage.baggage = Netro.setIn(description.baggage.baggage,
+              "tid", taskId.toString)
             sched.dagScheduler.taskStarted(task, info)
             return Some(description)
           }
@@ -624,7 +628,7 @@ private[spark] class TaskSetManager(
     * Marks the task as successful and notifies the DAGScheduler that a task has ended.
     */
   def handleSuccessfulTask(tid: Long, result: DirectTaskResult[_]): Unit = {
-
+    Netro.remove("tid")
     val taskEndBaggage = Baggage.stop()
     Baggage.start(baggage)
     edu.brown.cs.systems.tracingplane.baggage_buffers.BaggageBuffers.compact(taskEndBaggage.baggage)
