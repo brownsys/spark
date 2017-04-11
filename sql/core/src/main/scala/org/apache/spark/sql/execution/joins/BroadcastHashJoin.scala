@@ -104,7 +104,9 @@ case class BroadcastHashJoin(
     }
     val numOutputRows = longMetric("numOutputRows")
 
+    edu.brown.cs.systems.tracingplane.baggage_buffers.BaggageBuffersUtils.is_compaction.set(true);
     val broadcastRelation = Await.result(broadcastFuture, timeout)
+    edu.brown.cs.systems.tracingplane.baggage_buffers.BaggageBuffersUtils.is_compaction.set(false);
 
     streamedPlan.execute().mapPartitions { streamedIter =>
       val hashedRelation = broadcastRelation.value
